@@ -71,7 +71,7 @@ class Scraper(object):
         c.execute(char_t_com)
         c.execute(match_t_com)
     
-    def attempt_navigate(self, link, max_attempts=5, min_sleep=0.5, max_sleep=1.5):
+    def attempt_navigate(self, link, max_attempts=5, min_sleep=1.0, max_sleep=2.5):
         attempts = 0
         self.driver.get(link)
         while self.driver.title.startswith('500') and attempts < max_attempts:
@@ -155,7 +155,7 @@ class Scraper(object):
         total_arr = blue_arr + [blue_turns] + red_arr + [red_turns]
         return total_arr
 
-    def scrape_new_matches(self, done_matches, start_hint=0, min_sleep=0.5, max_sleep=1.5):   
+    def scrape_new_matches(self, done_matches, start_hint=0, min_sleep=1.0, max_sleep=2.5):   
         try:
             failures = open('failures.txt', 'a', encoding='utf-8')
             c = self.conn.cursor()
@@ -263,23 +263,23 @@ class Scraper(object):
 if __name__ == '__main__':
     scraper = Scraper('sprite.db', headless=True)
     scraper.create_tables()
-    #if os.path.exists('previous_characters.pkl'):
-    #    print('Loading previous characters')
-    #    with open('previous_characters.pkl', 'rb') as f:
-    #        previous_characters = pickle.load(f)
-    #else:
-    #    previous_characters = []
-    #scraper.scrape_characters(1, 'https://spriteclub.tv/characters?division=5', previous_characters)
-    #scraper.scrape_characters(2, 'https://spriteclub.tv/characters?division=4', previous_characters)
-    #scraper.scrape_characters(3, 'https://spriteclub.tv/characters?division=3', previous_characters)
-    #scraper.scrape_characters(4, 'https://spriteclub.tv/characters?division=2', previous_characters)
-    #scraper.scrape_characters(5, 'https://spriteclub.tv/characters?division=1', previous_characters)
-    #scraper.scrape_characters(-1, 'https://mugen.spriteclub.tv/characters?division=-1', previous_characters)
-    #scraper.scrape_characters(-2, 'https://mugen.spriteclub.tv/characters?division=-2', previous_characters)
-    #scraper.scrape_characters(-3, 'https://mugen.spriteclub.tv/characters?division=-3', previous_characters)
-    #with open('previous_characters.pkl', 'wb') as f:
-    #    print('Dumping previous characters')
-    #    pickle.dump(previous_characters, f)
+    if os.path.exists('previous_characters.pkl'):
+        print('Loading previous characters')
+        with open('previous_characters.pkl', 'rb') as f:
+            previous_characters = pickle.load(f)
+    else:
+        previous_characters = []
+    scraper.scrape_characters(1, 'https://spriteclub.tv/characters?division=5', previous_characters)
+    scraper.scrape_characters(2, 'https://spriteclub.tv/characters?division=4', previous_characters)
+    scraper.scrape_characters(3, 'https://spriteclub.tv/characters?division=3', previous_characters)
+    scraper.scrape_characters(4, 'https://spriteclub.tv/characters?division=2', previous_characters)
+    scraper.scrape_characters(5, 'https://spriteclub.tv/characters?division=1', previous_characters)
+    scraper.scrape_characters(-1, 'https://mugen.spriteclub.tv/characters?division=-1', previous_characters)
+    scraper.scrape_characters(-2, 'https://mugen.spriteclub.tv/characters?division=-2', previous_characters)
+    scraper.scrape_characters(-3, 'https://mugen.spriteclub.tv/characters?division=-3', previous_characters)
+    with open('previous_characters.pkl', 'wb') as f:
+        print('Dumping previous characters')
+        pickle.dump(previous_characters, f)
 
     if os.path.exists('previous_matches.pkl'):
         print('Loading previous matches')
