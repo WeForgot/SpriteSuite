@@ -1,5 +1,6 @@
 import os
 import pickle
+import random
 import sqlite3
 import time
 
@@ -7,7 +8,15 @@ from selenium import webdriver
 
 
 
-class MatchScraper(object):
+class Scraper(object):
+    Winner_Hint = {
+        'Blue': 0,
+        'Red': 1,
+        'Crash': 2,
+        'Skipped': 3,
+        'Tie': 4,
+        'Timeout': 5
+    }
     def __init__(self, db_name, driver_location=None, headless=False):
         from selenium.webdriver.chrome.options import Options
         
@@ -25,7 +34,6 @@ class MatchScraper(object):
         self.conn.close()
     
     def create_tables(self):
-        #conn.execute('SELECT * FROM Characters'):
         char_t_com = '''CREATE TABLE IF NOT EXISTS Characters (
             ID INTEGER PRIMARY KEY,
             Name TEXT NOT NULL,
@@ -41,13 +49,14 @@ class MatchScraper(object):
             Blue_1 INTEGER,
             Blue_2 INTEGER,
             Blue_3 INTEGER,
+            Blue_Turns INTEGER DEFAULT 0,
             Red_0 INTEGER NOT NULL,
             Red_1 INTEGER,
             Red_2 INTEGER,
             Red_3 INTEGER,
-            Turns INTEGER,
-            Winner INTEGER NOT NULL,
-            Mode TEXT NOT NULL,
+            Red_Turns INTEGER DEFAULT 0,
+            Outcome INTEGER NOT NULL,
+            Session TEXT NOT NULL,
             FOREIGN KEY (Red_0) REFERENCES Characters(ID),
             FOREIGN KEY (Red_1) REFERENCES Characters(ID),
             FOREIGN KEY (Red_2) REFERENCES Characters(ID),
@@ -62,119 +71,103 @@ class MatchScraper(object):
         c.execute(char_t_com)
         c.execute(match_t_com)
     
-    def attempt_navigate(self, link, max_attempts=5, sleep=5):
+    def attempt_navigate(self, link, max_attempts=5, min_sleep=0.5, max_sleep=1.5):
         attempts = 0
         self.driver.get(link)
         while self.driver.title.startswith('500') and attempts < max_attempts:
-            time.sleep(sleep)
+            time.sleep(random.uniform(min_sleep, max_sleep))
             self.driver.get(link)
             attempts += 1
             if attempts == max_attempts:
                 return False
         return True
-
-    def scrape_sessions(self, start_count=0):
-        # Tournament example single elim title: Tournament #22511 - Single Elimination 1v1 - 4th Division
-        # Tournament example double elim title: Tournament #22496 - Double Elimination 1v1 - 3rd Division
-        # Tournament example 2v1 title: Tournament #22478 - Double Elimination 2v1 - 1592 Rated
-        # Tournament example team title: Tournament #22502 - Single Elimination 3-Turn - 1234 Rated
-
-        # Title Selector: #info-header
-        # Table Selector: #stat-list
-        # Single Row Selector: 
-        #   Blue: #stat-list > div:nth-child(1) > div.elem.session-bluename
-        #   Red: #stat-list > div:nth-child(1) > div.elem.session-redname
-        #   Winner: #stat-list > div:nth-child(1) > div.elem.session-winner (additionally a span, but the span class is dependent on the winner, aka their color)        
-        c = self.conn.cursor()
-        index = start_count
-        template = 'https://mugen.spriteclub.tv/matches?startAt={}'
+    
+    def get_character_ids(self, char_name_array):
         id_query = 'SELECT ID FROM Characters WHERE Name = ?'
-        insert_com = 'INSERT INTO Matches (Red_0, Red_1, Red_2, Red_3, Blue_0, Blue_1, Blue_2, Blue_3, Turns, Winner, Mode) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-        while True:
-            if not self.attempt_navigate(template.format(index)):
-                return index
-            time.sleep(1)
-            try:
-                matches = self.driver.find_elements_by_class_name('stat-elem')
-            except Exception as e:
-                print(e)
-                return index
-            for match in matches:
-                blue_text = match.find_element_by_css_selector('div.elem.matches-bluename').text
-                red_text = match.find_element_by_css_selector('div.elem.matches-redname').text
-                red = [None, None, None, None]
-                blue = [None, None, None, None]
-                red_ids = [None, None, None, None]
-                blue_ids = [None, None, None, None]
-                turns = 0
-                if ' ⇒ ' in red or ' ⇒ ' in blue:
-                    turns = 1
-                    blue_split = blue_text.split(' ⇒ ')
-                    red_split = red_text.split(' ⇒ ')
-                    blue[:len(blue_split)] = blue_split
-                    red[:len(red_split)] = red_split
-                elif ' / ' in blue or ' / ' in red:
-                    blue_split = blue_text.split(' / ')
-                    red_split = red_text.split(' / ')
-                    blue[:len(blue_split)] = blue_split
-                    red[:len(red_split)] = red_split
-                else:
-                    blue[0] = blue_text
-                    red[0] = red_text
-                winner = match.find_element_by_css_selector('div.elem.matches-winner').text
-                if winner == 'Skipped' or winner == 'Tie' or winner == 'Crash' or winner == 'Timeout':
-                    continue
-                mode = match.find_element_by_css_selector('div.elem.matches-session > a').text.split(' ')[0]
-                for idx in range(len(red)):
-                    try:
-                        if red[idx] is not None:
-                            c.execute(id_query, (red[idx],))
-                            red_ids[idx] = c.fetchone()
-                    except Exception as e:
-                        print('Failed on {}'.format(red[idx]))
-                        print(e)
-                        return
-                    try:
-                        if blue[idx] is not None:
-                            c.execute(id_query, (blue[idx],))
-                            blue_ids[idx] = c.fetchone()
-                    except Exception as e:
-                        print('Failed on {}'.format(blue[idx]))
-                        print(e)
-                        return
-                #print('-------------------------')
-                #print('Blue: {} ({})\nRed: {} ({})\nWinner: {}\nMode: {}'.format(blue, blueID, red, redID, winner, mode))
-                #print('-------------------------')
-                winnerID = 0 if winner == 'Blue' else 1
-                c.execute(insert_com, (*red_ids, *blue_ids, turns, winnerID, mode))
-            self.conn.commit()
-            print('Completed matches {}->{}'.format(index, index+100))
-            time.sleep(3)
-            index += 100
+        c = self.conn.cursor()
+        to_return = []
+        not_found = []
+        # Using an array of character names, return an array of character IDs
+        for name in char_name_array:
+            if name is None:
+                to_return.append(None)
+                continue
+            c.execute(id_query, (name,))
+            fetched = c.fetchone()
+            if fetched is None:
+                not_found.append(name)
+            else:
+                idx = fetched[0]
+                to_return.append(idx)
+        if len(not_found) > 0:
+            #print('Could not find {}, skipping'.format(', '.join(not_found)[:-2]))
+            return None
+        return to_return
+    
+    def get_ids(self, char_name_array):
+        id_query = 'SELECT ID FROM Characters WHERE Name = ?'
+        c = self.conn.cursor()
+        went_bad = False
+        for idx in range(len(char_name_array)):
+            name = char_name_array[idx]
+            if name is None:
+                continue
+            # Uncomment below if there is any reason to include these
+            # From what I can tell they are either patched AI or replacements of the same name
+            #cleaned_name = name.replace(' (dupe)','') if name.endswith('(dupe)') else name
+            #cleaned_name = name.replace(' (old)','') if name.endswith('(old)') else name
+            #c.execute(id_query, (cleaned_name,))
+            c.execute(id_query, (name,))
+            fetched = c.fetchone()
+            if fetched is None:
+                went_bad = True
+                break
+            char_name_array[idx] = fetched[0]
+        return went_bad
+    
+    def parse_teams(self, blue_str, red_str):
+        blue_turns = 0
+        if ' / ' in blue_str:
+            blue_arr = blue_str.split(' / ')
+        elif ' ⇒ ' in blue_str:
+            blue_arr = blue_str.split(' ⇒ ')
+            blue_turns = 1
+        else:
+            blue_arr = [blue_str]
+        blue_arr += [None] * (4 - len(blue_arr))
+        
+        red_turns = 0
+        if ' / ' in red_str:
+            red_arr = red_str.split(' / ')
+        elif ' ⇒ ' in red_str:
+            red_arr = red_str.split(' ⇒ ')
+            red_turns = 1
+        else:
+            red_arr = [red_str]
+        red_arr += [None] * (4 - len(red_arr))
 
-    def scrape_new_matches(self, done_matches, start_hint=0, sleep=0):
-        # Tournament example single elim title: Tournament #22511 - Single Elimination 1v1 - 4th Division
-        # Tournament example double elim title: Tournament #22496 - Double Elimination 1v1 - 3rd Division
-        # Tournament example 2v1 title: Tournament #22478 - Double Elimination 2v1 - 1592 Rated
-        # Tournament example team title: Tournament #22502 - Single Elimination 3-Turn - 1234 Rated
+        blue_went_bad = self.get_ids(blue_arr)
+        red_went_bad = self.get_ids(red_arr)
 
-        # Title Selector: #info-header
-        # Table Selector: #stat-list
-        # Single Row Selector: 
-        #   Blue: #stat-list > div:nth-child(1) > div.elem.session-bluename
-        #   Red: #stat-list > div:nth-child(1) > div.elem.session-redname
-        #   Winner: #stat-list > div:nth-child(1) > div.elem.session-winner (additionally a span, but the span class is dependent on the winner, aka their color)        
+        if blue_went_bad or red_went_bad:
+            return None
+
+        total_arr = blue_arr + [blue_turns] + red_arr + [red_turns]
+        return total_arr
+
+    def scrape_new_matches(self, done_matches, start_hint=0, min_sleep=0.5, max_sleep=1.5):   
         try:
+            failures = open('failures.txt', 'a', encoding='utf-8')
             c = self.conn.cursor()
             index = start_hint
             template = 'https://mugen.spriteclub.tv/matches?startAt={}'
-            id_query = 'SELECT red.ID, blue.ID FROM Characters AS red, Characters AS blue WHERE red.Name = ? AND blue.Name = ?'
-            insert_com = 'INSERT INTO Matches (Red, Blue, Winner, Mode) VALUES (?,?,?,?)'
+            id_query = 'SELECT ID FROM Characters WHERE Name = ?'
+            query = 'INSERT INTO Matches (Blue_0, Blue_1, Blue_2, Blue_3, Blue_Turns, Red_0, Red_1, Red_2, Red_3, Red_Turns, Outcome, Session) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
             while True:
                 if not self.attempt_navigate(template.format(index)):
                     self.conn.commit()
                     return index
-                time.sleep(sleep)
+                time.sleep(random.uniform(min_sleep, max_sleep))
                 try:
                     matches = self.driver.find_elements_by_class_name('stat-elem')
                 except Exception as e:
@@ -186,156 +179,69 @@ class MatchScraper(object):
                 for match in matches:
                     match_id = int(match.find_element_by_css_selector('div.elem.matches-matchid.li-key > a').text)
                     if match_id in done_matches:
-                        print('Skipping match {}'.format(match_id))
                         continue
                     blue = match.find_element_by_css_selector('div.elem.matches-bluename').text
                     red = match.find_element_by_css_selector('div.elem.matches-redname').text
-                    if ' / ' in blue or ' / ' in red or ' ⇒ ' in blue or ' ⇒ ' in red:
+
+                    total_arr = self.parse_teams(blue, red)
+                    if total_arr is None:
+                        failures.write('Match ID:{}, Blue: {}, Red: {}\n'.format(match_id, blue, red))
+                        failures.flush()
                         continue
-                    winner = match.find_element_by_css_selector('div.elem.matches-winner').text
-                    if winner == 'Skipped' or winner == 'Tie' or winner == 'Crash' or winner == 'Timeout':
-                        continue
-                    mode = match.find_element_by_css_selector('div.elem.matches-session > a').text.split(' ')[0]
-                    c.execute(id_query, (red, blue))
-                    results = c.fetchone()
-                    if results is None:
-                        continue
-                    redID, blueID = results
-                    #print('-------------------------')
-                    #print('Blue: {} ({})\nRed: {} ({})\nWinner: {}\nMode: {}'.format(blue, blueID, red, redID, winner, mode))
-                    #print('-------------------------')
-                    winnerID = redID if winner == 'Red' else blueID
-                    c.execute(insert_com, (redID, blueID, winnerID, mode))
+
+                    winnerID = Scraper.Winner_Hint[match.find_element_by_css_selector('div.elem.matches-winner').text]
+
+                    sessionType = match.find_element_by_css_selector('div.elem.matches-session > a').text.split('#')[0][:-1]
+
+                    packed_variables = tuple(total_arr + [winnerID] + [sessionType])
+
+                    c.execute(query, packed_variables)
                     done_matches.append(match_id)
                 self.conn.commit()
                 print('Completed matches {}->{}'.format(index, index+100))
-                time.sleep(sleep)
+                time.sleep(random.uniform(min_sleep, max_sleep))
                 index += 100
         except KeyboardInterrupt as k:
+            failures.write('------------------------------------------\n')
+            failures.close()
             self.conn.commit()
             return
     
-    def scrape_select_matches(self, match_range, sleep=1):
-        c = self.conn.cursor()
-        index = 0
-        template = 'https://mugen.spriteclub.tv/matches?startAt={}'
-        id_query = 'SELECT red.ID, blue.ID FROM Characters AS red, Characters AS blue WHERE red.Name = ? AND blue.Name = ?'
-        insert_com = 'INSERT INTO Matches (Red, Blue, Winner, Mode) VALUES (?,?,?,?)'
-        while len(match_range) > 0:
-            if not self.attempt_navigate(template.format(index)):
-                return index
-            time.sleep(1)
-            try:
-                matches = self.driver.find_elements_by_class_name('stat-elem')
-            except Exception as e:
-                print(e)
-                return index
-            for match in matches:
-                match_ID = int(match.find_element_by_css_selector('div.elem.matches-matchid.li-key > a').text)
-                if match_ID in match_range:
-                    match_range.remove(match_ID)
-                    blue = match.find_element_by_css_selector('div.elem.matches-bluename').text
-                    red = match.find_element_by_css_selector('div.elem.matches-redname').text
-                    if ' / ' in blue or ' / ' in red or ' ⇒ ' in blue or ' ⇒ ' in red:
-                        continue
-                    winner = match.find_element_by_css_selector('div.elem.matches-winner').text
-                    if winner == 'Skipped' or winner == 'Tie' or winner == 'Crash' or winner == 'Timeout':
-                        continue
-                    mode = match.find_element_by_css_selector('div.elem.matches-session > a').text.split(' ')[0]
-                    c.execute(id_query, (red, blue))
-                    results = c.fetchone()
-                    if results is None:
-                        continue
-                    redID, blueID = results
-                    #print('-------------------------')
-                    #print('Blue: {} ({})\nRed: {} ({})\nWinner: {}\nMode: {}'.format(blue, blueID, red, redID, winner, mode))
-                    #print('-------------------------')
-                    winnerID = redID if winner == 'Red' else blueID
-                    c.execute(insert_com, (redID, blueID, winnerID, mode))
-                    
-            index += 100
-            time.sleep(3)
-            print('Skimed matches {}->{}. {} remaining'.format(index, index+100, len(match_range)))
-        self.conn.commit()
-            
-            
-
     def scrape_characters(self, division, link, done_characters, sleep_time=1, start_at=''):
-        c = self.conn.cursor()
-        self.driver.get(link)
-        characters = self.driver.find_elements_by_class_name('characters-name')
-        hrefs = []
-        hold_tight = False
-        if start_at != '':
-            hold_tight = True
-        for character in characters:
-            character_name = character.find_element_by_tag_name('a').text
-            if character_name in done_characters:
-                continue
-            if hold_tight:
-                if character_name == start_at:
-                    hold_tight = False
-                else:
-                    print(f'Skipping {character_name}')
-                continue
-            hrefs.append(character.find_element_by_tag_name('a').get_attribute('href'))
-        if len(hrefs) == 0:
-            print(f'No new characters in division {division}. Returning')
-            return
-        for href in hrefs:
-            self.driver.get(href)
-            attempts = 0
-            while '500' in self.driver.title and attempts < 5:
-                print('Failed to get page, refreshing')
-                time.sleep(5)
-                self.driver.get(href)
-                attempts += 1
-                if attempts == 5:
-                    self.conn.commit()
-                    return
-            charDiv = division
-            charName = self.driver.find_element_by_css_selector('#info-header > span').text
-            charLife = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(1)').text.strip()
-            charPow = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(2)').text.strip()
-            charAtk = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(3)').text.strip()
-            charDef = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(4)').text.strip()
-            print('-------------------------------------------------')
-            print(f'Name: {charName}\nDivision: {charDiv}\nLife: {charLife}\nPower: {charPow}\nAttack: {charAtk}\nDefense: {charDef}')
-            c.execute('''INSERT INTO Characters (Name,Division,Life,Power,Attack,Defense) VALUES
-                (?,?,?,?,?,?)''', (charName, charDiv, int(charLife), int(charPow), int(charAtk), int(charDef)))
-            print('-------------------------------------------------')
-            time.sleep(sleep_time)
-        self.conn.commit()
-        print(f'Completed the population of division {division}')
-    
-    def scrape_new_characters(self, sleep_time=1):
-        div_to_link = {
-            1: 'https://spriteclub.tv/characters?division=5',
-            2: 'https://spriteclub.tv/characters?division=4',
-            3: 'https://spriteclub.tv/characters?division=3',
-            4: 'https://spriteclub.tv/characters?division=2',
-            5: 'https://spriteclub.tv/characters?division=1'
-        }
-        c = self.conn.cursor()
-        for div in div_to_link:
-            if not self.attempt_navigate(div_to_link[div]):
-                return div_to_link[div]
+        try:
+            c = self.conn.cursor()
+            self.driver.get(link)
             characters = self.driver.find_elements_by_class_name('characters-name')
             hrefs = []
+            hold_tight = False
+            if start_at != '':
+                hold_tight = True
             for character in characters:
-                char_link = character.find_element_by_tag_name('a')
-                href = char_link.get_attribute('href')
-                name = char_link.text
-                c.execute('SELECT COUNT(*) FROM Characters WHERE Name=?', (name,))
-                exists = c.fetchone()[0]
-                if exists > 0:
+                character_name = character.find_element_by_tag_name('a').text
+                if character_name in done_characters:
                     continue
-                hrefs.append(href)
-                print('{} not found'.format(name))
+                if hold_tight:
+                    if character_name == start_at:
+                        hold_tight = False
+                    else:
+                        print(f'Skipping {character_name}')
+                    continue
+                hrefs.append(character.find_element_by_tag_name('a').get_attribute('href'))
+            if len(hrefs) == 0:
+                print(f'No new characters in division {division}. Returning')
+                return
             for href in hrefs:
-                if not self.attempt_navigate(href):
-                    return href
-                charDiv = div
+                self.driver.get(href)
+                attempts = 0
+                while '500' in self.driver.title and attempts < 5:
+                    print('Failed to get page, refreshing')
+                    time.sleep(5)
+                    self.driver.get(href)
+                    attempts += 1
+                    if attempts == 5:
+                        self.conn.commit()
+                        return
+                charDiv = division
                 charName = self.driver.find_element_by_css_selector('#info-header > span').text
                 charLife = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(1)').text.strip()
                 charPow = self.driver.find_element_by_css_selector('#content > div:nth-child(1) > div:nth-child(3) > div.character-info.flex-row > div:nth-child(2)').text.strip()
@@ -346,29 +252,34 @@ class MatchScraper(object):
                 c.execute('''INSERT INTO Characters (Name,Division,Life,Power,Attack,Defense) VALUES
                     (?,?,?,?,?,?)''', (charName, charDiv, int(charLife), int(charPow), int(charAtk), int(charDef)))
                 print('-------------------------------------------------')
+                done_characters.append(charName)
                 time.sleep(sleep_time)
-        self.conn.commit()
-        
-
-
+            self.conn.commit()
+            print(f'Completed the population of division {division}')
+        except KeyboardInterrupt as k:
+            self.conn.commit()
+            return
 
 if __name__ == '__main__':
-    scraper = MatchScraper('sprite_new.db', headless=True)
+    scraper = Scraper('sprite.db', headless=True)
     scraper.create_tables()
-    if os.path.exists('previous_characters.pkl'):
-        print('Loading previous characters')
-        with open('previous_characters.pkl', 'rb') as f:
-            previous_characters = pickle.load(f)
-    else:
-        previous_characters = []
-    scraper.scrape_characters(1, 'https://spriteclub.tv/characters?division=5', previous_characters)
-    scraper.scrape_characters(2, 'https://spriteclub.tv/characters?division=4', previous_characters)
-    scraper.scrape_characters(3, 'https://spriteclub.tv/characters?division=3', previous_characters)
-    scraper.scrape_characters(4, 'https://spriteclub.tv/characters?division=2', previous_characters)
-    scraper.scrape_characters(5, 'https://spriteclub.tv/characters?division=1', previous_characters)
-    with open('previous_characters.pkl', 'wb') as f:
-        print('Dumping previous characters')
-        pickle.dump(previous_characters, f)
+    #if os.path.exists('previous_characters.pkl'):
+    #    print('Loading previous characters')
+    #    with open('previous_characters.pkl', 'rb') as f:
+    #        previous_characters = pickle.load(f)
+    #else:
+    #    previous_characters = []
+    #scraper.scrape_characters(1, 'https://spriteclub.tv/characters?division=5', previous_characters)
+    #scraper.scrape_characters(2, 'https://spriteclub.tv/characters?division=4', previous_characters)
+    #scraper.scrape_characters(3, 'https://spriteclub.tv/characters?division=3', previous_characters)
+    #scraper.scrape_characters(4, 'https://spriteclub.tv/characters?division=2', previous_characters)
+    #scraper.scrape_characters(5, 'https://spriteclub.tv/characters?division=1', previous_characters)
+    #scraper.scrape_characters(-1, 'https://mugen.spriteclub.tv/characters?division=-1', previous_characters)
+    #scraper.scrape_characters(-2, 'https://mugen.spriteclub.tv/characters?division=-2', previous_characters)
+    #scraper.scrape_characters(-3, 'https://mugen.spriteclub.tv/characters?division=-3', previous_characters)
+    #with open('previous_characters.pkl', 'wb') as f:
+    #    print('Dumping previous characters')
+    #    pickle.dump(previous_characters, f)
 
     if os.path.exists('previous_matches.pkl'):
         print('Loading previous matches')
@@ -381,15 +292,5 @@ if __name__ == '__main__':
     with open('previous_matches.pkl', 'wb') as f:
         print('Dumping previous matches')
         pickle.dump(previous_matches, f)
-    
-    #scraper.scrape_sessions()
-    #scraper.scrape_new_characters()
-    #scraper.scrape_select_matches(list(range(697429,696215,-1)))
     scraper.shutdown()
-    #db = sqlite3.connect('test.db')
-    #c = db.cursor()
-    #c.execute('''SELECT name FROM sqlite_master''')
-    #tables = c.fetchall()
-    #db.close()
-    #assert ('Characters',) in tables and ('Matches',) in tables
-    #os.remove('test.db')
+

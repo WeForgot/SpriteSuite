@@ -1,0 +1,21 @@
+IDEA
+
+Create a function that takes in either red or blue side (or both)
+Check if each side has /, ⇒ or neither
+Generate a tuple FOR EACH SIDE being of form
+    Teamate0, Teamate1, Teamate2, Teamate3, Turns
+    *** If there are less than 4 teamates, any slot not filled will be NONE ***
+Change DB so that the columns are
+
+| MATCH_ID | BLUE0 | BLUE1 | BLUE2 | BLUE3 | BLUE_TURNS | RED0 | RED1 | RED2 | RED3| RED_TURNS | OUTCOME | SESSION_TYPE |
+
+THEN for the NN side we will have 2 universal bottleneck feature encoders that will run over each team seperately, then will either be concatenated or pooled into one
+
+Solo/Team encoder: Takes in 4 characters (none included) and uses a dense layer to turn it into a latent tensor
+Turns encoder: Takes in X characters (none NOT included) and uses an RNN layer to turn it into a latent tensor
+
+After that we use just normally FC layers to get our answer, this doesn't consider using character stats or anything, just the character embeddings
+
+
+
+START AT ~275000
