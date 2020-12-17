@@ -201,6 +201,11 @@ def build_joined_model(vocab_size, embedding_weights=None):
 
     return model
 
+class NewTFModel(tf.keras.Model):
+    def __init__(self):
+        super(NewTFModel, self).__init__()
+
+
 if __name__ == '__main__':
     load_old = False
     model_name = ''

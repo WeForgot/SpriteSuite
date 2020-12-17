@@ -141,3 +141,6 @@ cython_debug/
 *.db
 *.pkl
 *.exe
+
+/NeuralClubbing/checkpoints/
+/NeuralClubbing/logs/
