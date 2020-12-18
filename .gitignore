@@ -138,8 +138,6 @@ dmypy.json
 cython_debug/
 
 *.hdf5
-*.db
-*.pkl
 *.exe
 
 /NeuralClubbing/checkpoints/

@@ -6,14 +6,13 @@ import sqlite3
 import numpy as np
 from dotenv import load_dotenv
 import tensorflow as tf
-import tensorflow_addons as tfa
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 select_template = '''SELECT * FROM Characters WHERE Name=?'''
 
-def one_hot_encode(val, max_val=5):
+def one_hot_encode(val, max_val=6):
     hot = [0] * max_val
     # We assume values are NOT zero indexing anything
     hot[int(val)-1] = 1
@@ -101,6 +100,7 @@ def main(model_name, db_name):
                 #  Betting open for: Nazo Vs. MVC2 Megaman (3rd Division tournament match)
                 #  Betting open for: Brick Dragon II Vs. Schatten Geist (~1685 rated tournament match)
                 #  GRAND FINALS! Betting open for: Gato XI Vs. Edward FA (5th Division tournament match)
+                #  Betting open for: Rozwel Vs. Relius Clover XIII (3rd Division matchmaking)
                 username, channel, message = re.search(':(.*)\!.*@.*\.tmi\.twitch\.tv PRIVMSG #(.*) :(.*)', msg).groups()
                 if username == 'spriteclub':
                     if 'Betting open' in message:
