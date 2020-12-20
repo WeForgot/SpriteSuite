@@ -175,10 +175,12 @@ class Scraper(object):
                     self.conn.commit()
                     return index
                 if len(matches) == 0:
+                    print(f'Could not find new matches at {index}, returning')
                     return index
                 for match in matches:
                     match_id = int(match.find_element_by_css_selector('div.elem.matches-matchid.li-key > a').text)
                     if match_id in done_matches:
+                        print(f'Already documented {match_id}, skipping')
                         continue
                     blue = match.find_element_by_css_selector('div.elem.matches-bluename').text
                     red = match.find_element_by_css_selector('div.elem.matches-redname').text

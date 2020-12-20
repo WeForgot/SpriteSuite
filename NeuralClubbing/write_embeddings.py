@@ -2,7 +2,8 @@ import os
 import sqlite3
 
 import tensorflow as tf
-import tensorflow_addons as tfa
+
+from NeuralClubbing.model import build_model
 
 if __name__ == '__main__':
     model = tf.keras.models.load_model(os.path.join('..','SpriteHelper','sprite.hdf5'))
