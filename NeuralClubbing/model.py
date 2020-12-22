@@ -82,7 +82,7 @@ def build_model(emb_size, emb_len, output_dim, latent_dims):
 
 def main():
     num_characters, features, labels = load_data(os.path.join('..','MatchScraper','sprite.db'), collapse_degenerate_labels=True)
-    emb_len = [11]
+    emb_len = [9]
     output_labels = 3
     for emb in emb_len:
         for latent_pack in [([16,32,16], '131'), ([16,32,32], '133'), ([16,16,16], '111'), ([16,32,32], '113')]:
