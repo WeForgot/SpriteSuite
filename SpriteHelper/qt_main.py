@@ -9,13 +9,13 @@ import time
 
 import numpy as np
 from dotenv import load_dotenv
-from PySide6 import QtWidgets, QtCore, QtGui
+from PySide2 import QtWidgets, QtCore, QtGui
+import pyqtgraph as pg
 import tensorflow as tf
 
 sys.path.append('..')
 from NeuralClubbing.model import SpecialEmbedding
 load_dotenv()
-
 def one_hot_encode(val, max_val=6):
     hot = [0] * max_val
     # We assume values are NOT zero indexing anything
@@ -91,18 +91,21 @@ class SpriteHelper(QtWidgets.QDialog):
         self.ldb_button = QtWidgets.QPushButton('Load DB')
         self.ldb_label = QtWidgets.QLabel('None')
         self.connect_button = QtWidgets.QPushButton('Connect')
+        self.connect_label = QtWidgets.QLabel('Disconnected')
         self.disconnect_button = QtWidgets.QPushButton('Disconnect')
         self.model_filename = None
         self.db_filename = None
 
-        large_layout = QtWidgets.QGridLayout()
-
-        large_layout.addWidget(self.lmodel_button,0,0)
-        large_layout.addWidget(self.lmodel_label,0,1)
-        large_layout.addWidget(self.ldb_button,1,0)
-        large_layout.addWidget(self.ldb_label,1,1)
-        large_layout.addWidget(self.connect_button,2,0)
-        large_layout.addWidget(self.disconnect_button,3,0)
+        large_layout = QtWidgets.QVBoxLayout()
+        
+        load_layout = QtWidgets.QGridLayout()
+        load_layout.addWidget(self.lmodel_button,0,0)
+        load_layout.addWidget(self.lmodel_label,0,1)
+        load_layout.addWidget(self.ldb_button,1,0)
+        load_layout.addWidget(self.ldb_label,1,1)
+        load_layout.addWidget(self.connect_button,2,0)
+        load_layout.addWidget(self.connect_label,2,1)
+        load_layout.addWidget(self.disconnect_button,3,0)
 
         self.blue_0_label = QtWidgets.QLabel('Blue Team')
         self.blue_0_textbox = QtWidgets.QLineEdit('')
@@ -124,24 +127,48 @@ class SpriteHelper(QtWidgets.QDialog):
         self.red_3_textbox = QtWidgets.QLineEdit('')
         self.red_3_textbox.setReadOnly(True)
 
+        
+        info_layout = QtWidgets.QGridLayout()
+
+        info_layout.addWidget(self.blue_0_label,0,0, alignment=QtCore.Qt.AlignCenter)
+        info_layout.addWidget(self.blue_0_textbox,1,0)
+        info_layout.addWidget(self.blue_1_textbox,2,0)
+        info_layout.addWidget(self.blue_2_textbox,3,0)
+        info_layout.addWidget(self.blue_3_textbox,4,0)
+        info_layout.addWidget(self.red_0_label,0,1, alignment=QtCore.Qt.AlignCenter)
+        info_layout.addWidget(self.red_0_textbox,1,1)
+        info_layout.addWidget(self.red_1_textbox,2,1)
+        info_layout.addWidget(self.red_2_textbox,3,1)
+        info_layout.addWidget(self.red_3_textbox,4,1)
+
+        pred_layout = QtWidgets.QGridLayout()
+
         self.pred_label = QtWidgets.QLabel('Predictions')
+        self.pred_blue_label = QtWidgets.QLabel('Blue')
+        self.pred_red_label = QtWidgets.QLabel('Red')
+        self.pred_bad_label = QtWidgets.QLabel('Bad')
         self.blue_pred_textbox = QtWidgets.QLineEdit('')
         self.blue_pred_textbox.setReadOnly(True)
         self.red_pred_textbox = QtWidgets.QLineEdit('')
         self.red_pred_textbox.setReadOnly(True)
-        
+        self.bad_pred_textbox = QtWidgets.QLineEdit('')
+        self.bad_pred_textbox.setReadOnly(True)
+        self.emb_plot = pg.PlotWidget()
 
-        large_layout.addWidget(self.blue_0_label,4,0, alignment=QtCore.Qt.AlignCenter)
-        large_layout.addWidget(self.blue_0_textbox,5,0)
-        large_layout.addWidget(self.blue_1_textbox,6,0)
-        large_layout.addWidget(self.blue_2_textbox,7,0)
-        large_layout.addWidget(self.blue_3_textbox,8,0)
-        large_layout.addWidget(self.red_0_label,4,1, alignment=QtCore.Qt.AlignCenter)
-        large_layout.addWidget(self.red_0_textbox,5,1)
-        large_layout.addWidget(self.red_1_textbox,6,1)
-        large_layout.addWidget(self.red_2_textbox,7,1)
-        large_layout.addWidget(self.red_3_textbox,8,1)
-        large_layout.addWidget(self.)
+        pred_layout.addWidget(self.pred_label,0,0,1,3, alignment=QtCore.Qt.AlignCenter)
+        pred_layout.addWidget(self.pred_blue_label,1,0)
+        pred_layout.addWidget(self.pred_red_label,1,1)
+        pred_layout.addWidget(self.pred_bad_label,1,2)
+        pred_layout.addWidget(self.blue_pred_textbox,2,0)
+        pred_layout.addWidget(self.red_pred_textbox,2,1)
+        pred_layout.addWidget(self.bad_pred_textbox,2,2)
+        pred_layout.addWidget(self.emb_plot,3,0,2,3)
+
+
+
+        large_layout.addLayout(load_layout)
+        large_layout.addLayout(info_layout)
+        large_layout.addLayout(pred_layout)
 
         self.setLayout(large_layout)
         self.lmodel_button.clicked.connect(self.load_model)
@@ -177,6 +204,7 @@ class SpriteHelper(QtWidgets.QDialog):
             self.thread.started.connect(self.irc_listener.loop)
             self.irc_listener.message.connect(self.signal_recieved)
             QtCore.QTimer.singleShot(0, self.thread.start)
+            self.connect_label.setText('<font color=green>Connected</font>')
     
     def toggle_edit(self, editable):
         self.blue_0_textbox.setReadOnly(not editable)
@@ -205,6 +233,7 @@ class SpriteHelper(QtWidgets.QDialog):
     def try_disconnect(self):
         self.irc_listener.running = False
         self.thread.terminate()
+        self.connect_label.setText('Disconnected')
 
 BettingInformation = namedtuple('BettingInformation', ['blue_raw', 'blue_0', 'blue_1', 'blue_2', 'blue_3',
                                                        'blue_0_e', 'blue_1_e', 'blue_2_e', 'blue_3_e',
