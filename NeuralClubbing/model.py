@@ -82,10 +82,10 @@ def build_model(emb_size, emb_len, output_dim, latent_dims):
 
 def main():
     num_characters, features, labels = load_data(os.path.join('..','MatchScraper','sprite.db'), collapse_degenerate_labels=True)
-    emb_len = [9]
+    emb_len = [7,8,9,10,11,12]
     output_labels = 3
     for emb in emb_len:
-        for latent_pack in [([16,32,16], '131'), ([16,32,32], '133'), ([16,16,16], '111'), ([16,32,32], '113')]:
+        for latent_pack in [([16,32,16], '131'), ([16,32,32], '133'), ([16,16,16], '111'), ([16,16,32], '113')]:
             latent_dim, suffix = latent_pack
             model = build_model(num_characters, emb, output_labels, latent_dim)
             lr = tf.keras.experimental.CosineDecayRestarts(1e-2, 3000)
@@ -93,7 +93,7 @@ def main():
             loss = tf.keras.losses.CategoricalCrossentropy()
             model.compile(optimizer, loss, metrics=[tf.keras.metrics.CategoricalAccuracy()])
             checkpoint_name = os.path.join('.','checkpoints', 'vl_{val_loss:.3f}_ca_{val_categorical_accuracy:.3f}' + '_{}_{}.hdf5'.format(emb, suffix))
-            callbacks = [tf.keras.callbacks.TerminateOnNaN(), tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True), tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True)]
+            callbacks = [tf.keras.callbacks.TerminateOnNaN(), tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True), tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True)]
             history = model.fit(x=features, y=labels, epochs=50, batch_size=32, shuffle=True, validation_split=0.2, callbacks=callbacks)
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 from collections import namedtuple
 from logging import disable
 import os
+import pickle
 import re
 import socket
 import sqlite3
@@ -11,11 +12,16 @@ import numpy as np
 from dotenv import load_dotenv
 from PySide2 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
+from sklearn.manifold import TSNE, LocallyLinearEmbedding
+from sklearn.decomposition import KernelPCA
 import tensorflow as tf
 
 sys.path.append('..')
 from NeuralClubbing.model import SpecialEmbedding
 load_dotenv()
+
+debug_line = 'Betting open for: [ Caviar? ⇒ Presea Combatir ⇒ Burai Yamamoto ⇒ Rinnosuke Morichika ] Vs. [ Ryuken ⇒ SS6 Senna ⇒ Nogami Neuro ⇒ Jedah K ] (5th Division matchmaking)'
+
 def one_hot_encode(val, max_val=6):
     hot = [0] * max_val
     # We assume values are NOT zero indexing anything
@@ -82,6 +88,12 @@ def get_all_embeddings(conn, model):
     for result in results:
         emb[result[1]] = embeddings[result[0]]
     return emb
+
+def closest_point(point, pointList):
+    nodes = np.asarray(pointList)
+    dist_2 = np.sum((nodes - point)**2, axis=1)
+    return np.argmin(dist_2)
+
 
 class SpriteHelper(QtWidgets.QDialog):
     def __init__(self, parent=None):
@@ -154,6 +166,13 @@ class SpriteHelper(QtWidgets.QDialog):
         self.bad_pred_textbox = QtWidgets.QLineEdit('')
         self.bad_pred_textbox.setReadOnly(True)
         self.emb_plot = pg.PlotWidget()
+        self.emb_plot.setXRange(-1, 1, padding=0)
+        self.emb_plot.setYRange(-1, 1, padding=0)
+        self.sel_char_label = QtWidgets.QLabel('Selected character')
+        self.sel_char_textbox = QtWidgets.QLineEdit('')
+        self.sel_char_textbox.setReadOnly(True)
+        self.sel_emb_label = QtWidgets.QLabel('Embeddings')
+        self.sel_emb_table = QtWidgets.QTableWidget()
 
         pred_layout.addWidget(self.pred_label,0,0,1,3, alignment=QtCore.Qt.AlignCenter)
         pred_layout.addWidget(self.pred_blue_label,1,0)
@@ -163,6 +182,10 @@ class SpriteHelper(QtWidgets.QDialog):
         pred_layout.addWidget(self.red_pred_textbox,2,1)
         pred_layout.addWidget(self.bad_pred_textbox,2,2)
         pred_layout.addWidget(self.emb_plot,3,0,2,3)
+        pred_layout.addWidget(self.sel_char_label,5,0,1,1)
+        pred_layout.addWidget(self.sel_char_textbox,5,1,1,3)
+        pred_layout.addWidget(self.sel_emb_label,6,0,1,1)
+        pred_layout.addWidget(self.sel_emb_table,6,1,1,3)
 
 
 
@@ -175,6 +198,10 @@ class SpriteHelper(QtWidgets.QDialog):
         self.ldb_button.clicked.connect(self.load_db)
         self.connect_button.clicked.connect(self.try_connect)
         self.disconnect_button.clicked.connect(self.try_disconnect)
+
+        self.cbi = None # Current Betting Information
+        self.point_to_name = {}
+        self.emb_scatter = None
     
     def load_model(self):
         filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '.', self.tr('Model files (*.hdf5 *.h5)'))
@@ -203,8 +230,8 @@ class SpriteHelper(QtWidgets.QDialog):
             self.irc_listener.moveToThread(self.thread)
             self.thread.started.connect(self.irc_listener.loop)
             self.irc_listener.message.connect(self.signal_recieved)
+            self.irc_listener.readying.connect(self.update_status)
             QtCore.QTimer.singleShot(0, self.thread.start)
-            self.connect_label.setText('<font color=green>Connected</font>')
     
     def toggle_edit(self, editable):
         self.blue_0_textbox.setReadOnly(not editable)
@@ -216,32 +243,120 @@ class SpriteHelper(QtWidgets.QDialog):
         self.red_1_textbox.setReadOnly(not editable)
         self.red_2_textbox.setReadOnly(not editable)
         self.red_3_textbox.setReadOnly(not editable)
+        
+        self.blue_pred_textbox.setReadOnly(not editable)
+        self.red_pred_textbox.setReadOnly(not editable)
+        self.bad_pred_textbox.setReadOnly(not editable)
+
+        self.sel_char_textbox.setReadOnly(not editable)
+
+
+    def update_betting_ui(self):
+        if self.cbi is None:
+            return
+        self.toggle_edit(True)
+        self.blue_0_textbox.setText(self.cbi.blue_0) if self.cbi.blue_0 is not None else ''
+        self.blue_1_textbox.setText(self.cbi.blue_1) if self.cbi.blue_1 is not None else ''
+        self.blue_2_textbox.setText(self.cbi.blue_2) if self.cbi.blue_2 is not None else ''
+        self.blue_3_textbox.setText(self.cbi.blue_3) if self.cbi.blue_3 is not None else ''
+
+        self.red_0_textbox.setText(self.cbi.red_0) if self.cbi.red_0 is not None else ''
+        self.red_1_textbox.setText(self.cbi.red_1) if self.cbi.red_1 is not None else ''
+        self.red_2_textbox.setText(self.cbi.red_2) if self.cbi.red_2 is not None else ''
+        self.red_3_textbox.setText(self.cbi.red_3) if self.cbi.red_3 is not None else ''
+
+        self.blue_pred_textbox.setText('{:.3f}'.format(self.cbi.blue_prob))
+        self.red_pred_textbox.setText('{:.3f}'.format(self.cbi.red_prob))
+        self.bad_pred_textbox.setText('{:.3f}'.format(self.cbi.bad_prob))
+        self.toggle_edit(False)
+
+        names = []
+        blue_points = []
+        red_points = []
+        reduced_embs = []
+        if self.cbi.blue_0 is not None:
+            blue_points.append(self.cbi.blue_0_e)
+            reduced_embs.append(self.cbi.blue_0_re)
+            names.append(self.cbi.blue_0)
+        if self.cbi.blue_1 is not None:
+            blue_points.append(self.cbi.blue_1_e)
+            reduced_embs.append(self.cbi.blue_1_re)
+            names.append(self.cbi.blue_1)
+        if self.cbi.blue_2 is not None:
+            blue_points.append(self.cbi.blue_2_e)
+            reduced_embs.append(self.cbi.blue_2_re)
+            names.append(self.cbi.blue_2)
+        if self.cbi.blue_3 is not None:
+            blue_points.append(self.cbi.blue_3_e)
+            reduced_embs.append(self.cbi.blue_3_re)
+            names.append(self.cbi.blue_3)
+        if self.cbi.red_0 is not None:
+            red_points.append(self.cbi.red_0_e)
+            reduced_embs.append(self.cbi.red_0_re)
+            names.append(self.cbi.red_0)
+        if self.cbi.red_1 is not None:
+            red_points.append(self.cbi.red_1_e)
+            reduced_embs.append(self.cbi.red_1_re)
+            names.append(self.cbi.red_1)
+        if self.cbi.red_2 is not None:
+            red_points.append(self.cbi.red_2_e)
+            reduced_embs.append(self.cbi.red_2_re)
+            names.append(self.cbi.red_2)
+        if self.cbi.red_3 is not None:
+            red_points.append(self.cbi.red_3_e)
+            reduced_embs.append(self.cbi.red_2_re)
+            names.append(self.cbi.red_3)
+        total_points = np.asarray(blue_points + red_points)
+            
+        blue_brush = pg.mkBrush((0,0,255))
+        red_brush = pg.mkBrush((255,0,0))
+        blue_x = [x[0] for x in reduced_embs[:len(blue_points)]]
+        blue_y = [x[1] for x in reduced_embs[:len(blue_points)]]
+        red_x = [x[0] for x in reduced_embs[len(blue_points):]]
+        red_y = [x[1] for x in reduced_embs[len(blue_points):]]
+        total_x = blue_x + red_x
+        total_y = blue_y + red_y
+        total_brush = [blue_brush] * len(blue_points) + [red_brush] * len(red_points)
+        self.emb_plot.clear()
+        self.emb_scatter = self.emb_plot.plot(x=total_x, y=total_y, pen=None, symbol='o', symbolBrush=total_brush, hoverable=True, hoverSymbol='s')
+
+        def set_selected(ev, point):
+            idx = closest_point(np.asarray(point.pos()), reduced_embs)
+            closest_char = names[idx]
+            self.toggle_edit(True)
+            self.sel_char_textbox.setText(closest_char)
+            self.toggle_edit(False)
+            self.sel_emb_table.setRowCount(1)
+            self.sel_emb_table.setColumnCount(len(total_points[idx]))
+            for x in range(len(total_points[idx])):
+                self.sel_emb_table.setItem(0, x, QtWidgets.QTableWidgetItem('{:.5f}'.format(total_points[idx][x])))
+
+        self.emb_scatter.sigClicked.connect(set_selected)
     
     def signal_recieved(self, message):
-        self.toggle_edit(True)
-        self.blue_0_textbox.setText(message.blue_0) if message.blue_0 is not None else ''
-        self.blue_1_textbox.setText(message.blue_1) if message.blue_1 is not None else ''
-        self.blue_2_textbox.setText(message.blue_2) if message.blue_2 is not None else ''
-        self.blue_3_textbox.setText(message.blue_3) if message.blue_3 is not None else ''
-
-        self.red_0_textbox.setText(message.red_0) if message.red_0 is not None else ''
-        self.red_1_textbox.setText(message.red_1) if message.red_1 is not None else ''
-        self.red_2_textbox.setText(message.red_2) if message.red_2 is not None else ''
-        self.red_3_textbox.setText(message.red_3) if message.red_3 is not None else ''
-        self.toggle_edit(False)
+        self.cbi = message
+        if message is not None:
+            self.update_betting_ui()
     
     def try_disconnect(self):
         self.irc_listener.running = False
         self.thread.terminate()
         self.connect_label.setText('Disconnected')
+    
+    def update_status(self, message):
+        self.connect_label.setText(message)
+
 
 BettingInformation = namedtuple('BettingInformation', ['blue_raw', 'blue_0', 'blue_1', 'blue_2', 'blue_3',
                                                        'blue_0_e', 'blue_1_e', 'blue_2_e', 'blue_3_e',
+                                                       'blue_0_re', 'blue_1_re', 'blue_2_re', 'blue_3_re',
                                                        'red_raw', 'red_0', 'red_1', 'red_2', 'red_3', 
                                                        'red_0_e', 'red_1_e', 'red_2_e', 'red_3_e',
+                                                       'red_0_re', 'red_1_re', 'red_2_re', 'red_3_re',
                                                        'blue_prob', 'red_prob', 'bad_prob'])
 class IRC_Listener(QtCore.QObject):
     message = QtCore.Signal(BettingInformation)
+    readying = QtCore.Signal(str)
 
     def __init__(self, model_path, db_path):
         QtCore.QObject.__init__(self)
@@ -252,9 +367,14 @@ class IRC_Listener(QtCore.QObject):
         self.running = True
     
     def loop(self):
+        self.readying.emit('Loading model and DB')
         model = tf.keras.models.load_model(self.model_path, custom_objects={'SpecialEmbedding': SpecialEmbedding})
         db = sqlite3.connect(self.db_path)
+        self.readying.emit('Collecting embeddings')
         embeddings = get_all_embeddings(db, model)
+        self.readying.emit('Training KernelPCA')
+        kpca = KernelPCA(n_components=2).fit(list(embeddings.values())[1:])
+        self.readying.emit('Connecting to IRC')
         server = 'irc.chat.twitch.tv'
         port = 6667
         nickname = os.getenv('NICKNAME')
@@ -266,6 +386,8 @@ class IRC_Listener(QtCore.QObject):
         sock.send(f'PASS {token}\n'.encode('utf-8'))
         sock.send(f'NICK {nickname}\n'.encode('utf-8'))
         sock.send(f'JOIN {channel}\n'.encode('utf-8'))
+        self.readying.emit('<font color=green>Connected</font>')
+        
         while self.running:
             msg = sock.recv(2048).decode('utf-8')
             if msg.startswith('PING'):
@@ -298,13 +420,22 @@ class IRC_Listener(QtCore.QObject):
                                 tex_pred = ' at your own risk'
                             current_info = BettingInformation(raw_blue, split_blue[0], split_blue[1], split_blue[2], split_blue[3],
                                                               embeddings[split_blue[0]], embeddings[split_blue[1]], embeddings[split_blue[2]], embeddings[split_blue[3]],
+                                                              kpca.transform([embeddings[split_blue[0]]])[0] if split_blue[0] != 0 else None, 
+                                                              kpca.transform([embeddings[split_blue[1]]])[0] if split_blue[1] != 0 else None, 
+                                                              kpca.transform([embeddings[split_blue[2]]])[0] if split_blue[2] != 0 else None, 
+                                                              kpca.transform([embeddings[split_blue[3]]])[0] if split_blue[3] != 0 else None, 
                                                               raw_red, split_red[0], split_red[1], split_red[2], split_red[3],
                                                               embeddings[split_red[0]], embeddings[split_red[1]], embeddings[split_red[2]], embeddings[split_red[3]],
+                                                              kpca.transform([embeddings[split_red[0]]])[0] if split_red[0] != 0 else None, 
+                                                              kpca.transform([embeddings[split_red[1]]])[0] if split_red[1] != 0 else None, 
+                                                              kpca.transform([embeddings[split_red[2]]])[0] if split_red[2] != 0 else None, 
+                                                              kpca.transform([embeddings[split_red[3]]])[0] if split_red[3] != 0 else None, 
                                                               predictions[0],predictions[1],predictions[2])
                             self.message.emit(current_info)
 
                         elif 'Winner: ' in message:
                             pass
+
         print('Killed')
     
 
