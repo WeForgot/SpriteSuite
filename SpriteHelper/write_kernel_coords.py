@@ -31,15 +31,15 @@ def get_all_embeddings(conn, model):
     return emb
 
 def main():
-    model = tf.keras.models.load_model('vl_0.662_ca_0.674_8_113.hdf5', custom_objects={'SpecialEmbedding': SpecialEmbedding})
+    model = tf.keras.models.load_model('..\\NeuralClubbing\\checkpoints\\binary_vl_0.599_ca_0.674_9_66.hdf5', custom_objects={'SpecialEmbedding': SpecialEmbedding})
     db = sqlite3.connect('sprite.db')
     embeddings = list(get_all_embeddings(db, model).values())
-    kpca = KernelPCA(n_components=2).fit_transform(embeddings[1:])
-    kpca = np.insert(kpca, 0, np.zeros(2,), axis=0)
-    print(kpca)
-    print(np.max(kpca))
-    print(np.min(kpca))
-    np.save('pca_reductions.npy', kpca)
+    coordinates = TSNE(n_components=2).fit_transform(embeddings[1:])
+    coordinates = np.insert(coordinates, 0, np.zeros(2,), axis=0)
+    print(coordinates)
+    print(np.max(coordinates))
+    print(np.min(coordinates))
+    np.save('precomputed_tsne.npy', coordinates)
 
 
 if __name__ == '__main__':

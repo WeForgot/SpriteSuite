@@ -1,5 +1,6 @@
 from collections import namedtuple
 from logging import disable
+from math import ceil, floor
 import os
 import pickle
 import re
@@ -166,8 +167,8 @@ class SpriteHelper(QtWidgets.QDialog):
         self.bad_pred_textbox = QtWidgets.QLineEdit('')
         self.bad_pred_textbox.setReadOnly(True)
         self.emb_plot = pg.PlotWidget()
-        self.emb_plot.setXRange(-1, 1, padding=0)
-        self.emb_plot.setYRange(-1, 1, padding=0)
+        self.emb_plot.setXRange(-100, 100, padding=0)
+        self.emb_plot.setYRange(-100, 100, padding=0)
         self.sel_char_label = QtWidgets.QLabel('Selected character')
         self.sel_char_textbox = QtWidgets.QLineEdit('')
         self.sel_char_textbox.setReadOnly(True)
@@ -204,14 +205,14 @@ class SpriteHelper(QtWidgets.QDialog):
         self.emb_scatter = None
     
     def load_model(self):
-        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '.', self.tr('Model files (*.hdf5 *.h5)'))
+        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '..', self.tr('Model files (*.hdf5 *.h5)'))
         if filename[0] != '':
             self.model_filename = filename[0]
             self.lmodel_label.setText(filename[0])
 
 
     def load_db(self):
-        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '.', 'Database files (*.db)')
+        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '..', 'Database files (*.db)')
         if filename[0] != '':
             self.db_filename = filename[0]
             self.ldb_label.setText(filename[0])
@@ -255,19 +256,19 @@ class SpriteHelper(QtWidgets.QDialog):
         if self.cbi is None:
             return
         self.toggle_edit(True)
-        self.blue_0_textbox.setText(self.cbi.blue_0) if self.cbi.blue_0 is not None else ''
-        self.blue_1_textbox.setText(self.cbi.blue_1) if self.cbi.blue_1 is not None else ''
-        self.blue_2_textbox.setText(self.cbi.blue_2) if self.cbi.blue_2 is not None else ''
-        self.blue_3_textbox.setText(self.cbi.blue_3) if self.cbi.blue_3 is not None else ''
+        self.blue_0_textbox.setText(self.cbi.blue_0) if self.cbi.blue_0 is not None else self.blue_0_textbox.setText('')
+        self.blue_1_textbox.setText(self.cbi.blue_1) if self.cbi.blue_1 is not None else self.blue_1_textbox.setText('')
+        self.blue_2_textbox.setText(self.cbi.blue_2) if self.cbi.blue_2 is not None else self.blue_2_textbox.setText('')
+        self.blue_3_textbox.setText(self.cbi.blue_3) if self.cbi.blue_3 is not None else self.blue_3_textbox.setText('')
 
-        self.red_0_textbox.setText(self.cbi.red_0) if self.cbi.red_0 is not None else ''
-        self.red_1_textbox.setText(self.cbi.red_1) if self.cbi.red_1 is not None else ''
-        self.red_2_textbox.setText(self.cbi.red_2) if self.cbi.red_2 is not None else ''
-        self.red_3_textbox.setText(self.cbi.red_3) if self.cbi.red_3 is not None else ''
+        self.red_0_textbox.setText(self.cbi.red_0) if self.cbi.red_0 is not None else self.red_0_textbox.setText('')
+        self.red_1_textbox.setText(self.cbi.red_1) if self.cbi.red_1 is not None else self.red_1_textbox.setText('')
+        self.red_2_textbox.setText(self.cbi.red_2) if self.cbi.red_2 is not None else self.red_2_textbox.setText('')
+        self.red_3_textbox.setText(self.cbi.red_3) if self.cbi.red_3 is not None else self.red_3_textbox.setText('')
 
         self.blue_pred_textbox.setText('{:.3f}'.format(self.cbi.blue_prob))
         self.red_pred_textbox.setText('{:.3f}'.format(self.cbi.red_prob))
-        self.bad_pred_textbox.setText('{:.3f}'.format(self.cbi.bad_prob))
+        self.bad_pred_textbox.setText('{:.3f}'.format(self.cbi.bad_prob)) if self.cbi.bad_prob is not None else self.bad_pred_textbox.setDisabled(True)
         self.toggle_edit(False)
 
         names = []
@@ -368,12 +369,21 @@ class IRC_Listener(QtCore.QObject):
     
     def loop(self):
         self.readying.emit('Loading model and DB')
-        model = tf.keras.models.load_model(self.model_path, custom_objects={'SpecialEmbedding': SpecialEmbedding})
+        try:
+            model = tf.keras.models.load_model(self.model_path, custom_objects={'SpecialEmbedding': SpecialEmbedding})
+        except Exception as e:
+            print(e)
+            self.readying.emit('Failed loading')
+            return
         db = sqlite3.connect(self.db_path)
         self.readying.emit('Collecting embeddings')
         embeddings = get_all_embeddings(db, model)
-        self.readying.emit('Training KernelPCA')
-        kpca = KernelPCA(n_components=2).fit(list(embeddings.values())[1:])
+        self.readying.emit('Training TSNE')
+        #kpca = KernelPCA(n_components=2).fit(list(embeddings.values())[1:])
+        if os.path.exists('precomputed_tsne.npy'):
+            coordinates = np.load('precomputed_tsne.npy')
+        else:
+            coordinates = TSNE(n_components=2).fit_transform(list(embeddings.values()))
         self.readying.emit('Connecting to IRC')
         server = 'irc.chat.twitch.tv'
         port = 6667
@@ -399,39 +409,39 @@ class IRC_Listener(QtCore.QObject):
                         if 'Betting open' in message:
                             if '(Exhibition by ' in message:
                                 continue
-                            to_strip_l = message.find('Betting open for: ') + len('Betting open for: ')
-                            to_strip_r = message.rfind(' (')
-                            message = message[to_strip_l:to_strip_r]
-                            raw_blue, raw_red = message.split(' Vs. ')
-                            if raw_blue.startswith('[ '):
-                                raw_blue = raw_blue[2:-2]
-                            if raw_red.startswith('[ '):
-                                raw_red = raw_red[2:-2]
-                            match_array, split_blue, split_red = parse_teams(raw_blue, raw_red, db)
-                            if match_array is None:
-                                continue
-                            predictions = model(np.asarray([match_array]))[0].numpy()
-                            cur_pred = np.argmax(predictions)
-                            if cur_pred == 0:
-                                tex_pred = ' blue'
-                            elif cur_pred == 1:
-                                tex_pred = ' red'
-                            else:
-                                tex_pred = ' at your own risk'
-                            current_info = BettingInformation(raw_blue, split_blue[0], split_blue[1], split_blue[2], split_blue[3],
-                                                              embeddings[split_blue[0]], embeddings[split_blue[1]], embeddings[split_blue[2]], embeddings[split_blue[3]],
-                                                              kpca.transform([embeddings[split_blue[0]]])[0] if split_blue[0] != 0 else None, 
-                                                              kpca.transform([embeddings[split_blue[1]]])[0] if split_blue[1] != 0 else None, 
-                                                              kpca.transform([embeddings[split_blue[2]]])[0] if split_blue[2] != 0 else None, 
-                                                              kpca.transform([embeddings[split_blue[3]]])[0] if split_blue[3] != 0 else None, 
-                                                              raw_red, split_red[0], split_red[1], split_red[2], split_red[3],
-                                                              embeddings[split_red[0]], embeddings[split_red[1]], embeddings[split_red[2]], embeddings[split_red[3]],
-                                                              kpca.transform([embeddings[split_red[0]]])[0] if split_red[0] != 0 else None, 
-                                                              kpca.transform([embeddings[split_red[1]]])[0] if split_red[1] != 0 else None, 
-                                                              kpca.transform([embeddings[split_red[2]]])[0] if split_red[2] != 0 else None, 
-                                                              kpca.transform([embeddings[split_red[3]]])[0] if split_red[3] != 0 else None, 
-                                                              predictions[0],predictions[1],predictions[2])
-                            self.message.emit(current_info)
+                            try:
+                                to_strip_l = message.find('Betting open for: ') + len('Betting open for: ')
+                                to_strip_r = message.rfind(' (')
+                                message = message[to_strip_l:to_strip_r]
+                                raw_blue, raw_red = message.split(' Vs. ')
+                                if raw_blue.startswith('[ '):
+                                    raw_blue = raw_blue[2:-2]
+                                if raw_red.startswith('[ '):
+                                    raw_red = raw_red[2:-2]
+                                match_array, split_blue, split_red = parse_teams(raw_blue, raw_red, db)
+                                if match_array is None:
+                                    continue
+                                predictions = model(np.asarray([match_array]))[0].numpy()
+                                if len(predictions) == 1:
+                                    predictions = np.asarray([1- predictions[0], predictions[0]]) # Red is label 1 so we need to kinda switch stuff
+                                current_info = BettingInformation(raw_blue, split_blue[0], split_blue[1], split_blue[2], split_blue[3],
+                                                                embeddings[split_blue[0]], embeddings[split_blue[1]], embeddings[split_blue[2]], embeddings[split_blue[3]],
+                                                                coordinates[match_array[0]] if split_blue[0] != 0 else None, 
+                                                                coordinates[match_array[1]] if split_blue[1] != 0 else None, 
+                                                                coordinates[match_array[2]] if split_blue[2] != 0 else None, 
+                                                                coordinates[match_array[3]] if split_blue[3] != 0 else None, 
+                                                                raw_red, split_red[0], split_red[1], split_red[2], split_red[3],
+                                                                embeddings[split_red[0]], embeddings[split_red[1]], embeddings[split_red[2]], embeddings[split_red[3]],
+                                                                coordinates[match_array[5]] if split_red[0] != 0 else None, 
+                                                                coordinates[match_array[6]] if split_red[1] != 0 else None, 
+                                                                coordinates[match_array[7]] if split_red[2] != 0 else None, 
+                                                                coordinates[match_array[8]] if split_red[3] != 0 else None, 
+                                                                predictions[0],predictions[1],
+                                                                predictions[2] if len(predictions) > 2 else None)
+                                self.message.emit(current_info)
+                            except Exception as e:
+                                print('Something went wrong during betting')
+                                print(e)
 
                         elif 'Winner: ' in message:
                             pass
