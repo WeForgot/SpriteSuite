@@ -106,11 +106,12 @@ def main():
     optimizer_used = 'adamax' # Can be 'adamax' or 'novo'. Anything else defaults to SGD
     early_stop = True # Whether to add the early stopping callback (patiece can be set in code below)
     auto_checkpoint = True # Whether to let the model automatically create checkpoints every time it gets a new personal best
+    reduce_lr = False # Whether to reduce learning rate based on it leveling out
     batch_size = 128
 
     num_characters, features, labels = load_data(os.path.join('..','MatchScraper','sprite.db'), collapse_degenerate_labels=collapse_degenerate_labels, skip_degenerate_labels=skip_degenerate_labels, make_binary=make_binary, skip_exhibs=skip_exhibs)
     train_features, valid_features, train_labels, valid_labels = train_test_split(features, labels, test_size=0.2, random_state=420)
-    emb_len = [9]
+    emb_len = [9,10]
     if make_binary:
         output_labels = 1
     elif skip_degenerate_labels:
@@ -120,8 +121,8 @@ def main():
     else:
         output_labels = 6
     for emb in emb_len:
-        for latent_pack in [([64,128], '64-128')]:
-            latent_dim, suffix = latent_pack
+        for latent_dim in [[64,64], [64,128], [128,128]]:
+            suffix = '-'.join(latent_dim)
             model = build_model(num_characters, emb, output_labels, latent_dim)
             if optimizer_used == 'adamax':
                 # Adamax consistently has great results
@@ -148,6 +149,8 @@ def main():
                 callbacks.append(tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True))
             if auto_checkpoint:
                 callbacks.append(tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True))
+            if reduce_lr:
+                callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=5))
             history = model.fit(x=train_features, y=train_labels, epochs=200, batch_size=batch_size, shuffle=True, validation_data=(valid_features,valid_labels), callbacks=callbacks)
 
 if __name__ == '__main__':
