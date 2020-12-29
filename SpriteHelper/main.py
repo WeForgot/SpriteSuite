@@ -1,8 +1,5 @@
 from collections import namedtuple
-from logging import disable
-from math import ceil, floor
 import os
-import pickle
 import re
 import socket
 import sqlite3
@@ -11,10 +8,9 @@ import time
 
 import numpy as np
 from dotenv import load_dotenv
-from PySide2 import QtWidgets, QtCore, QtGui
+from PySide2 import QtWidgets, QtCore
 import pyqtgraph as pg
-from sklearn.manifold import TSNE, LocallyLinearEmbedding
-from sklearn.decomposition import KernelPCA
+from sklearn.manifold import TSNE
 import tensorflow as tf
 
 sys.path.append('..')
@@ -376,11 +372,11 @@ class IRC_Listener(QtCore.QObject):
         db = sqlite3.connect(self.db_path)
         self.readying.emit('Collecting embeddings')
         embeddings = get_all_embeddings(db, model)
-        self.readying.emit('Training TSNE')
-        #kpca = KernelPCA(n_components=2).fit(list(embeddings.values())[1:])
         if os.path.exists('precomputed_tsne.npy'):
+            self.readying.emit('Loading TSNE')
             coordinates = np.load('precomputed_tsne.npy')
         else:
+            self.readying.emit('Training TSNE')
             coordinates = TSNE(n_components=2).fit_transform(list(embeddings.values()))
         self.readying.emit('Connecting to IRC')
         server = 'irc.chat.twitch.tv'
