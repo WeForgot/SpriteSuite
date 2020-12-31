@@ -30,10 +30,13 @@ def get_all_embeddings(conn, model):
     return emb
 
 def main():
-    model = tf.keras.models.load_model('..\\NeuralClubbing\\checkpoints\\binary_vl_0.577_ca_0.692_9_64-128.hdf5', custom_objects={'SpecialEmbedding': SpecialEmbedding})
+    model = tf.keras.models.load_model('..\\NeuralClubbing\\checkpoints\\binary_vl_0.569_ca_0.702_2_64-128.hdf5', custom_objects={'SpecialEmbedding': SpecialEmbedding})
     db = sqlite3.connect('..\\MatchScraper\\sprite.db')
     emb_dict = get_all_embeddings(db, model)
     embeddings = list(emb_dict.values())
+    print(np.max(embeddings))
+    print(np.min(embeddings))
+    return
     coordinates = TSNE(n_components=2, perplexity=45).fit_transform(embeddings[1:])
     coordinates = np.insert(coordinates, 0, np.zeros(2,), axis=0)
     np.save('precomputed_tsne.npy', coordinates)

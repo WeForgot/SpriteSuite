@@ -87,10 +87,7 @@ def build_model(emb_size, emb_len, output_dim, latent_dims):
     # Remember, more simple can be better (in this case it is)
     return tf.keras.Sequential([
         SpecialEmbedding(emb_size, emb_len, latent_dim=latent_dims[0], name='special_embedding'),
-        tf.keras.layers.Dense(units=latent_dims[1], activation=None),
-        tf.keras.layers.LeakyReLU(),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dropout(rate=0.4),
+        tf.keras.layers.Dense(units=latent_dims[1], activation='gelu'),
         tf.keras.layers.Dense(units=output_dim, activation='sigmoid' if output_dim == 1 else 'softmax')
     ])
 
@@ -110,7 +107,7 @@ def main():
 
     num_characters, features, labels = load_data(os.path.join('..','MatchScraper','sprite.db'), collapse_degenerate_labels=collapse_degenerate_labels, skip_degenerate_labels=skip_degenerate_labels, make_binary=make_binary, skip_exhibs=skip_exhibs)
     train_features, valid_features, train_labels, valid_labels = train_test_split(features, labels, test_size=0.2, random_state=420)
-    emb_len = [8,9]
+    emb_len = [2]
     if make_binary:
         output_labels = 1
     elif skip_degenerate_labels:
@@ -120,7 +117,7 @@ def main():
     else:
         output_labels = 6
     for emb in emb_len:
-        for latent_dim in ([64,128],):
+        for latent_dim in ([8,16],):
             suffix = '-'.join(list(map(str, latent_dim)))
             model = build_model(num_characters, emb, output_labels, latent_dim)
             if optimizer_used == 'adamax':
@@ -149,7 +146,7 @@ def main():
             if auto_checkpoint:
                 callbacks.append(tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True))
             if reduce_lr:
-                callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5))
+                callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.9, patience=1))
             history = model.fit(x=train_features, y=train_labels, epochs=200, batch_size=batch_size, shuffle=True, validation_data=(valid_features,valid_labels), callbacks=callbacks)
 
 if __name__ == '__main__':

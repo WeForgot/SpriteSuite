@@ -161,8 +161,8 @@ class SpriteHelper(QtWidgets.QDialog):
         self.bad_pred_textbox = QtWidgets.QLineEdit('')
         self.bad_pred_textbox.setReadOnly(True)
         self.emb_plot = pg.PlotWidget()
-        self.emb_plot.setXRange(-100, 100, padding=0)
-        self.emb_plot.setYRange(-100, 100, padding=0)
+        self.emb_plot.setXRange(-0.25, 0.25, padding=0)
+        self.emb_plot.setYRange(-0.25, 0.25, padding=0)
         self.sel_char_label = QtWidgets.QLabel('Selected character')
         self.sel_char_textbox = QtWidgets.QLineEdit('')
         self.sel_char_textbox.setReadOnly(True)
@@ -372,12 +372,11 @@ class IRC_Listener(QtCore.QObject):
         db = sqlite3.connect(self.db_path)
         self.readying.emit('Collecting embeddings')
         embeddings = get_all_embeddings(db, model)
-        if os.path.exists('precomputed_tsne.npy'):
-            self.readying.emit('Loading TSNE')
-            coordinates = np.load('precomputed_tsne.npy')
-        else:
+        if len(embeddings[None]) > 2:
             self.readying.emit('Training TSNE')
             coordinates = TSNE(n_components=2).fit_transform(list(embeddings.values()))
+        else:
+            coordinates = list(embeddings.values())
         self.readying.emit('Connecting to IRC')
         server = 'irc.chat.twitch.tv'
         port = 6667
