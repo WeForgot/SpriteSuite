@@ -1,7 +1,7 @@
 {
     "embeddings": [
       {
-        "tensorName": "My tensor",
+        "tensorName": "SpriteSuite Character Embeddings",
         "tensorShape": [
           12079,
           2
