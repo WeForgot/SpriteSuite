@@ -1,0 +1,13 @@
+{
+    "embeddings": [
+      {
+        "tensorName": "My tensor",
+        "tensorShape": [
+          12079,
+          2
+        ],
+        "tensorPath": "https://raw.githubusercontent.com/WeForgot/SpriteSuite/master/NeuralClubbing/weights.tsv",
+        "metadataPath": "https://raw.githubusercontent.com/WeForgot/SpriteSuite/master/NeuralClubbing/characters.tsv"
+      }
+    ]
+  }
