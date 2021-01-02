@@ -5,7 +5,7 @@ import sqlite3
 import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from tensorflow.python.eager.context import collect_graphs
+import tensorflow_addons as tfa
 
 def one_hot_encode(val, max_val):
     hot = [0] * max_val
@@ -99,15 +99,15 @@ def main():
 
     skip_exhibs = True # Exhibs sometimes have pallete shenan's. Ignoring them is the more stable choice for embeddings overall
     label_smoothing = 0.0 # Leniency for "correctness" of a guess. Higher numbers = answers closer to 0.5
-    optimizer_used = 'adamax' # Can be 'adamax' or 'adadelta'. Anything else defaults to SGD
+    optimizer_used = 'lookahead' # Can be 'adamax' or 'adadelta'. Anything else defaults to SGD
     early_stop = True # Whether to add the early stopping callback (patiece can be set in code below)
     auto_checkpoint = True # Whether to let the model automatically create checkpoints every time it gets a new personal best
-    reduce_lr = True # Whether to reduce learning rate based on it leveling out
+    reduce_lr = False # Whether to reduce learning rate based on it leveling out
     batch_size = 64
 
     num_characters, features, labels = load_data(os.path.join('..','MatchScraper','sprite.db'), collapse_degenerate_labels=collapse_degenerate_labels, skip_degenerate_labels=skip_degenerate_labels, make_binary=make_binary, skip_exhibs=skip_exhibs)
     train_features, valid_features, train_labels, valid_labels = train_test_split(features, labels, test_size=0.2, random_state=420)
-    emb_len = [2]
+    emb_len = [3,3,2,2]
     if make_binary:
         output_labels = 1
     elif skip_degenerate_labels:
@@ -117,7 +117,7 @@ def main():
     else:
         output_labels = 6
     for emb in emb_len:
-        for latent_dim in ([8,16],):
+        for latent_dim in ([4,8],):
             suffix = '-'.join(list(map(str, latent_dim)))
             model = build_model(num_characters, emb, output_labels, latent_dim)
             if optimizer_used == 'adamax':
@@ -126,9 +126,19 @@ def main():
             elif optimizer_used == 'adadelta':
                 # Adadelta is more lightweight and should give preference to embeddings being more diverse
                 optimizer = tf.keras.optimizers.Adadelta(1e-3)
+            elif optimizer_used == 'swa':
+                #lr = tf.keras.experimental.CosineDecayRestarts(1e-1, first_decay_steps=80000, alpha=0.01, t_mul=2, m_mul=0.5)
+                #optimizer = tf.keras.optimizers.SGD(lr, momentum=0.9, nesterov=True)
+                optimizer = tf.keras.optimizers.Adamax(1e-3)
+                optimizer = tfa.optimizers.SWA(optimizer)
+            elif optimizer_used == 'lookahead':
+                #lr = tf.keras.experimental.CosineDecayRestarts(1e-1, first_decay_steps=80000, alpha=0.01, t_mul=2, m_mul=0.5)
+                #optimizer = tf.keras.optimizers.SGD(1e-3, momentum=0.9, nesterov=True)
+                optimizer = tf.keras.optimizers.Adamax(1e-3)
+                optimizer = tfa.optimizers.Lookahead(optimizer)
             else:
                 # SGD + momentum + scheduler (with restarts) actually has yielded the best results, just needs multiple attempts
-                lr = tf.keras.experimental.CosineDecayRestarts(1e-1, first_decay_steps=160000, alpha=0.01, t_mul=1, m_mul=1)
+                lr = tf.keras.experimental.CosineDecayRestarts(1e-1, first_decay_steps=80000, alpha=0.01, t_mul=2, m_mul=0.5)
                 optimizer = tf.keras.optimizers.SGD(lr, momentum=0.9, nesterov=True)
 
             if make_binary:
@@ -144,7 +154,10 @@ def main():
             if early_stop:
                 callbacks.append(tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True))
             if auto_checkpoint:
-                callbacks.append(tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True))
+                if optimizer_used == 'swa':
+                    callbacks.append(tfa.callbacks.AverageModelCheckpoint(filepath=checkpoint_name, monitor='val_loss', save_best_only=True, update_weights=True))
+                else:
+                    callbacks.append(tf.keras.callbacks.ModelCheckpoint(checkpoint_name, monitor='val_loss', save_best_only=True))
             if reduce_lr:
                 callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.9, patience=1))
             history = model.fit(x=train_features, y=train_labels, epochs=200, batch_size=batch_size, shuffle=True, validation_data=(valid_features,valid_labels), callbacks=callbacks)

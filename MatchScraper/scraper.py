@@ -155,7 +155,7 @@ class Scraper(object):
         total_arr = blue_arr + [blue_turns] + red_arr + [red_turns]
         return total_arr
 
-    def scrape_new_matches(self, done_matches, start_hint=0, min_sleep=1.0, max_sleep=2.5):   
+    def scrape_new_matches(self, done_matches, start_hint=0, min_sleep=1.0, max_sleep=2.5, auto_stop=True, stop_thresh=25):   
         try:
             failures = open('failures.txt', 'a', encoding='utf-8')
             c = self.conn.cursor()
@@ -169,6 +169,7 @@ class Scraper(object):
                     return index
                 time.sleep(random.uniform(min_sleep, max_sleep))
                 try:
+                    matches_skipped = 0
                     matches = self.driver.find_elements_by_class_name('stat-elem')
                 except Exception as e:
                     print(e)
@@ -178,10 +179,16 @@ class Scraper(object):
                     print(f'Could not find new matches at {index}, returning')
                     return index
                 for match in matches:
+                    if auto_stop and matches_skipped > stop_thresh:
+                        print('Automatically stopping due to threshold criteria')
+                        self.conn.commit()
+                        return index
                     match_id = int(match.find_element_by_css_selector('div.elem.matches-matchid.li-key > a').text)
                     if match_id in done_matches:
+                        matches_skipped += 1
                         print(f'Already documented {match_id}, skipping')
                         continue
+                    matches_skipped = 0
                     blue = match.find_element_by_css_selector('div.elem.matches-bluename').text
                     red = match.find_element_by_css_selector('div.elem.matches-redname').text
 
