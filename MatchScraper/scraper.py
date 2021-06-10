@@ -73,14 +73,18 @@ class Scraper(object):
     
     def attempt_navigate(self, link, max_attempts=5, min_sleep=1.0, max_sleep=2.5):
         attempts = 0
-        self.driver.get(link)
-        while self.driver.title.startswith('500') and attempts < max_attempts:
-            time.sleep(random.uniform(min_sleep, max_sleep))
+        try:
             self.driver.get(link)
-            attempts += 1
-            if attempts == max_attempts:
-                return False
-        return True
+            while self.driver.title.startswith('500') and attempts < max_attempts:
+                time.sleep(random.uniform(min_sleep, max_sleep))
+                self.driver.get(link)
+                attempts += 1
+                if attempts == max_attempts:
+                    return False
+            return True
+        except Exception as e:
+            print(e)
+            return False
     
     def get_character_ids(self, char_name_array):
         id_query = 'SELECT ID FROM Characters WHERE Name = ?'
@@ -301,7 +305,7 @@ if __name__ == '__main__':
         else:
             print('Making new matches')
             previous_matches = []
-        scraper.scrape_new_matches(previous_matches)
+        scraper.scrape_new_matches(previous_matches, start_hint=700800)
         with open('previous_matches.pkl', 'wb') as f:
             print('Dumping previous matches')
             pickle.dump(previous_matches, f)

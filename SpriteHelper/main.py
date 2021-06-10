@@ -8,13 +8,12 @@ import time
 
 import numpy as np
 from dotenv import load_dotenv
-from PySide2 import QtWidgets, QtCore
+from PySide2 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
 from sklearn.manifold import TSNE
-import tensorflow as tf
 
 sys.path.append('..')
-from NeuralClubbing.model import SpecialEmbedding
+from NeuralClubbing.model import SpriteModel
 load_dotenv()
 
 debug_line = 'Betting open for: [ Caviar? ⇒ Presea Combatir ⇒ Burai Yamamoto ⇒ Rinnosuke Morichika ] Vs. [ Ryuken ⇒ SS6 Senna ⇒ Nogami Neuro ⇒ Jedah K ] (5th Division matchmaking)'
@@ -161,8 +160,8 @@ class SpriteHelper(QtWidgets.QDialog):
         self.bad_pred_textbox = QtWidgets.QLineEdit('')
         self.bad_pred_textbox.setReadOnly(True)
         self.emb_plot = pg.PlotWidget()
-        self.emb_plot.setXRange(-0.25, 0.25, padding=0)
-        self.emb_plot.setYRange(-0.25, 0.25, padding=0)
+        self.emb_plot.setXRange(-2, 2, padding=0.1)
+        self.emb_plot.setYRange(-2, 2, padding=0.1)
         self.sel_char_label = QtWidgets.QLabel('Selected character')
         self.sel_char_textbox = QtWidgets.QLineEdit('')
         self.sel_char_textbox.setReadOnly(True)
@@ -199,7 +198,7 @@ class SpriteHelper(QtWidgets.QDialog):
         self.emb_scatter = None
     
     def load_model(self):
-        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '..', self.tr('Model files (*.hdf5 *.h5)'))
+        filename = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Model', '..', self.tr('Model files (*.pt)'))
         if filename[0] != '':
             self.model_filename = filename[0]
             self.lmodel_label.setText(filename[0])
@@ -365,6 +364,7 @@ class IRC_Listener(QtCore.QObject):
         self.readying.emit('Loading model and DB')
         try:
             model = tf.keras.models.load_model(self.model_path, custom_objects={'SpecialEmbedding': SpecialEmbedding})
+            model = SpriteModel()
         except Exception as e:
             print(e)
             self.readying.emit('Failed loading')
